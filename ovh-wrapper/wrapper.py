@@ -195,10 +195,24 @@ def cmd_list_ips(_args):
 
 def cmd_get_ip_details(args):
     """
-    GET /ip/{ip}/reverse — returns list of PTR record dicts for the IP.
-    Empty list = no reverse DNS set.
+    GET /ip/{ip} — returns the IP block record (type, routedTo, org,
+    campus, version, canBeTerminated). Plus, fetches /ip/{ip}/reverse
+    for each PTR record ID and merges the resolved reverse hostnames
+    into `reverseRecords`. Used by tcs-docs#115 for orphan detection
+    (an IP with routedTo.serviceName == null/empty is an orphan).
     """
-    return _client().get(f"/ip/{args.ip}/reverse")
+    c = _client()
+    info = c.get(f"/ip/{args.ip}")
+    try:
+        rev_ids = c.get(f"/ip/{args.ip}/reverse")
+        info["reverseRecords"] = [
+            c.get(f"/ip/{args.ip}/reverse/{rid}")
+            for rid in rev_ids
+        ]
+    except APIError as e:
+        info["reverseRecords"] = []
+        info["reverseError"] = str(e)
+    return info
 
 
 # ─── argparse ───────────────────────────────────────────────────────
