@@ -160,14 +160,16 @@ def cmd_delete_snapshot(_args):
     return _client().delete(f"/vps/{VPS_NAME}/snapshot")
 
 
-def cmd_get_latest_bill(_args):
+def cmd_get_latest_bill(args):
     """
-    GET /me/bill filtered to last 30 days, then GET /me/bill/{id} for
-    each returned id (OVH returns just ids from the list endpoint).
-    Returns list of bill summary dicts.
+    GET /me/bill filtered to last N days (default 30), then
+    GET /me/bill/{id} for each returned id (OVH returns just ids from
+    the list endpoint). Returns list of bill summary dicts.
+
+    --days accepts wider windows for one-off backfill (annual bills).
     """
     c = _client()
-    since = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
+    since = (datetime.now(timezone.utc) - timedelta(days=args.days)).isoformat()
     # OVH filter syntax: date.from (period in query key name)
     ids = c.get("/me/bill", **{"date.from": since})
     return [c.get(f"/me/bill/{bid}") for bid in ids]
@@ -240,7 +242,16 @@ def _build_parser():
         help="Delete the current snapshot (frees the VPS-2 slot, no id needed)",
     )
 
-    sub.add_parser("get-latest-bill", help="Bills from the last 30 days")
+    p_bill = sub.add_parser(
+        "get-latest-bill",
+        help="Bills from the last N days (default 30)",
+    )
+    p_bill.add_argument(
+        "--days",
+        type=int,
+        default=30,
+        help="Look-back window in days (default 30; use larger for backfill)",
+    )
 
     p_bd = sub.add_parser("get-bill-details", help="Line-item details for a bill")
     p_bd.add_argument("bill_id")
