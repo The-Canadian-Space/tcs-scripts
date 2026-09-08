@@ -115,7 +115,7 @@ def cmd_poll_task(args):
     started = time.time()
     c = _client()
     while True:
-        task = c.get(f"/vps/{VPS_NAME}/task/{args.task_id}")
+        task = c.get(f"/vps/{VPS_NAME}/tasks/{args.task_id}")
         state = task.get("state", "unknown")
         if state in ("done", "error", "cancelled"):
             return task
@@ -129,20 +129,35 @@ def cmd_poll_task(args):
 
 
 def cmd_list_snapshots(_args):
-    """GET /vps/{name}/snapshot — returns list of snapshot ids."""
+    """
+    GET /vps/{name}/snapshot — returns the CURRENT snapshot object
+    (single, not a list — VPS-2 tier has 1 slot). Raises 404 via
+    `ResourceNotFoundError` when no snapshot exists.
+
+    Kept the name `list-snapshots` for CLI stability; the response
+    is a single dict, not an array.
+    """
     return _client().get(f"/vps/{VPS_NAME}/snapshot")
 
 
-def cmd_restore_snapshot(args):
+def cmd_restore_snapshot(_args):
     """
-    POST /vps/{name}/snapshot/{snapshotId}/restore. DESTRUCTIVE-REVERSIBLE.
+    POST /vps/{name}/snapshot/revert. DESTRUCTIVE-REVERSIBLE. No id
+    argument — the endpoint operates on the current (only) snapshot.
     Returns task JSON; poll it with poll-task to know when the restore
-    completes. Auto-deletes the snapshot after successful restore
-    (VPS-2 tier: 1 concurrent snapshot cap).
+    completes. Auto-deletes the snapshot after successful restore.
     """
-    return _client().post(
-        f"/vps/{VPS_NAME}/snapshot/{args.snapshot_id}/restore"
-    )
+    return _client().post(f"/vps/{VPS_NAME}/snapshot/revert")
+
+
+def cmd_delete_snapshot(_args):
+    """
+    DELETE /vps/{name}/snapshot. No id argument — the endpoint operates
+    on the current (only) snapshot. Returns task JSON; poll to confirm
+    deletion. Called by maintenance.sh after a successful run to free
+    the VPS-2 slot for the next run.
+    """
+    return _client().delete(f"/vps/{VPS_NAME}/snapshot")
 
 
 def cmd_get_latest_bill(_args):
@@ -210,13 +225,20 @@ def _build_parser():
         help="Max wait in seconds (default 900 = 15 min)",
     )
 
-    sub.add_parser("list-snapshots", help="List current VPS snapshots")
-
-    p_rest = sub.add_parser(
-        "restore-snapshot",
-        help="Restore a snapshot (DESTRUCTIVE-REVERSIBLE)",
+    sub.add_parser(
+        "list-snapshots",
+        help="Get the current VPS snapshot (single object, or 404 if none)",
     )
-    p_rest.add_argument("snapshot_id")
+
+    sub.add_parser(
+        "restore-snapshot",
+        help="Restore the current snapshot (DESTRUCTIVE-REVERSIBLE, no id needed)",
+    )
+
+    sub.add_parser(
+        "delete-snapshot",
+        help="Delete the current snapshot (frees the VPS-2 slot, no id needed)",
+    )
 
     sub.add_parser("get-latest-bill", help="Bills from the last 30 days")
 
@@ -237,6 +259,7 @@ COMMANDS = {
     "poll-task": cmd_poll_task,
     "list-snapshots": cmd_list_snapshots,
     "restore-snapshot": cmd_restore_snapshot,
+    "delete-snapshot": cmd_delete_snapshot,
     "get-latest-bill": cmd_get_latest_bill,
     "get-bill-details": cmd_get_bill_details,
     "list-ips": cmd_list_ips,
