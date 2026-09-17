@@ -59,9 +59,9 @@ def test_header_happy_path_16_9(client, tmp_path, monkeypatch):
     })
     assert resp.status_code == 200, resp.data
     body = resp.get_json()
-    assert body["dimensions"]["width"] == 800
-    # 102 (bar) + 5 (line) + 450 (source scaled to 800 wide from 1600x900) = 557
-    assert body["dimensions"]["height"] == 557
+    assert body["dimensions"]["width"] == 600
+    # 102 (bar) + 5 (line) + 338 (source scaled to 600 wide from 1600x900) = 445
+    assert body["dimensions"]["height"] == 445
     assert body["cached"] is False
     assert body["output_url"].startswith("https://assets.thecanadian.space/headers/daily-broadcast/2404-")
     assert body["output_url"].endswith(".jpg")
@@ -74,7 +74,7 @@ def test_header_happy_path_16_9(client, tmp_path, monkeypatch):
 
     # Verify the written file decodes back to the expected dimensions
     with Image.open(expected_path) as im:
-        assert im.size == (800, 557)
+        assert im.size == (600, 445)
 
 
 def test_header_cache_hit(client, tmp_path, monkeypatch):
@@ -143,7 +143,7 @@ def test_header_rejects_absolute_path(client, monkeypatch):
 
 
 def test_header_portrait_source(client, tmp_path, monkeypatch):
-    # Portrait 4:5 source (800x1000 → scaled to 800x1000 no-op → total 1107)
+    # Portrait 4:5 source (800x1000 → scaled to 600x750 → 102 + 5 + 750 = 857)
     _install_fake_fetch(monkeypatch, _synthetic_source(800, 1000))
 
     resp = client.post("/header", json={
@@ -154,7 +154,7 @@ def test_header_portrait_source(client, tmp_path, monkeypatch):
     })
     assert resp.status_code == 200
     body = resp.get_json()
-    assert body["dimensions"] == {"width": 800, "height": 1107}
+    assert body["dimensions"] == {"width": 600, "height": 857}
 
 
 def test_composite_still_works(client):
