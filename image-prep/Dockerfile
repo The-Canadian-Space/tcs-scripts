@@ -17,7 +17,15 @@ WORKDIR /app
 COPY requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
+# App code + bundled fonts (Space Grotesk variable TTF for the /header endpoint,
+# design lock: tcs-scripts#5). OFL.txt travels with the font for license compliance.
 COPY app.py /app/app.py
+COPY fonts/ /app/fonts/
+
+# Output volume mount point for /header's generated JPEGs. Owner must match the
+# runtime user so writes succeed once a host bind-mount is attached.
+RUN mkdir -p /output \
+    && chown -R imageprep:imageprep /output /app/fonts
 
 USER imageprep
 EXPOSE 3001

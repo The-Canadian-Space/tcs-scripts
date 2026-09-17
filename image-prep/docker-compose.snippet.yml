@@ -4,6 +4,10 @@
 #
 # No host port mapping — service is unreachable from the public internet
 # (and from the host's curl too), only from inside the compose network.
+#
+# The /output volume mount is required by the /header endpoint. Host directory
+# `/opt/tcs/assets` must exist and be owned by uid 1000 (matches container's
+# `imageprep` user). See tcs-docs/docs/infrastructure/ for the setup writeup.
 
   image-prep:
     build: /opt/tcs/image-prep
@@ -12,3 +16,9 @@
     # NO `ports:` block — internal-only on the compose network.
     # Add the same network as the other services if you have an explicit
     # network defined; default compose project network works otherwise.
+    environment:
+      TCS_OUTPUT_ROOT: /output
+      TCS_ASSET_URL_BASE: https://assets.thecanadian.space
+      TCS_HEADER_FONT: /app/fonts/SpaceGrotesk-VariableFont_wght.ttf
+    volumes:
+      - /opt/tcs/assets:/output:rw
