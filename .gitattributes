@@ -1,0 +1,7 @@
+# CHANGELOG.md uses git's `union` merge driver: when two branches both add
+# lines to the same section (typical for the auto-changelog bot when several
+# issues close close together), git keeps BOTH sides' additions instead of
+# emitting <<<<<<< / ======= / >>>>>>> conflict markers. Order between the
+# two sets of new lines is non-deterministic and can be tidied later; the
+# important thing is that merges never fail on this file. Refs #17.
+CHANGELOG.md merge=union

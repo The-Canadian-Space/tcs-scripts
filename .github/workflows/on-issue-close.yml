@@ -4,6 +4,16 @@ on:
   issues:
     types: [closed]
 
+# Serialize per-repo. When several issues close close together, GitHub fires
+# one run per issue in parallel — each opens its own PR against the same
+# CHANGELOG line, and every PR after the first-to-merge starts life needing
+# a rebase. Queueing runs behind a single concurrency group lets each new
+# entry land against the effect of the previous one. Refs #17.
+# cancel-in-progress: false — don't drop a run, wait for the current one.
+concurrency:
+  group: append-changelog
+  cancel-in-progress: false
+
 # The reusable workflow needs contents: write to commit + push CHANGELOG.
 # The-Canadian-Space org sets default_workflow_permissions=read, so we
 # override at the caller.
