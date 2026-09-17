@@ -5,6 +5,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+- chore: append-changelog.yml — eliminate the same-line conflict when multiple issues close close together ([#17](https://github.com/The-Canadian-Space/tcs-scripts/issues/17)) — closed 2026-09-17 by @Godimas101
 - \[wp-snippets\] Canonical tcs-header-image.php Code Snippet ([#8](https://github.com/The-Canadian-Space/tcs-scripts/issues/8)) — closed 2026-09-17 by @Godimas101
 - \[wp-snippets\] Probe: Rank Math OG filter behavior smoke test ([#7](https://github.com/The-Canadian-Space/tcs-scripts/issues/7)) — closed 2026-09-17 by @Godimas101
 - \[image-prep\] POST /header endpoint (Pillow + Poppins) ([#6](https://github.com/The-Canadian-Space/tcs-scripts/issues/6)) — closed 2026-09-17 by @Godimas101
