@@ -2,7 +2,7 @@
 /**
  * TCS Header Image Adapter
  * ------------------------------------------------------------------
- * Version: 1.0.0
+ * Version: 1.1.0
  * Canonical source: tcs-scripts/wp-snippets/tcs-header-image.php
  * Ticket: https://github.com/The-Canadian-Space/tcs-scripts/issues/8
  * Design spec: https://github.com/The-Canadian-Space/tcs-scripts/issues/5
@@ -10,9 +10,9 @@
  *
  * The WordPress side of the Blog Header Images V1 pipeline.
  * Reads _tcs_header_url post meta (written by the n8n Blog Posting workflow
- * after image-prep's POST /header generates the branded 800px composite) and
- * injects that URL into every WordPress surface that would otherwise emit a
- * featured image, OG image, or RSS thumbnail:
+ * after image-prep's POST /header generates the branded composite) and injects
+ * that URL into every WordPress surface that would otherwise emit a featured
+ * image, OG image, or RSS thumbnail:
  *
  *   - post_thumbnail_html                    → in-page featured image
  *   - rank_math/opengraph/facebook/image     → og:image
@@ -35,6 +35,18 @@
  * WARNING: When pasting into Code Snippets, drop the opening `<?php` tag.
  * The plugin evals the snippet body directly.
  * ------------------------------------------------------------------
+ *
+ * CHANGELOG
+ *   1.1.0 (2026-09-17):
+ *     - Register `_tcs_header_url` as REST-visible protected meta so the n8n
+ *       Blog Posting workflow's POST /wp/v2/posts payload can actually store
+ *       it. Without this, WordPress silently drops unregistered protected
+ *       (underscore-prefixed) meta on save — which is exactly what happened
+ *       to post 2420 on 2026-09-17.
+ *     - Bump every filter priority from 10 → 999 so this snippet wins against
+ *       FIFU (and anything else) on `post_thumbnail_html` and the OG image
+ *       hooks. FIFU otherwise runs after us and can override our injection.
+ *   1.0.0 (2026-09-17): initial release.
  */
 
 // ------------------------------------------------------------------
@@ -42,6 +54,23 @@
 // ------------------------------------------------------------------
 if (!defined('TCS_HEADER_META_KEY')) {
     define('TCS_HEADER_META_KEY', '_tcs_header_url');
+}
+
+// ------------------------------------------------------------------
+// 0. Register `_tcs_header_url` for REST — without this, WP silently drops
+//    it on POST /wp/v2/posts because underscore-prefixed meta is "protected"
+//    and unregistered protected meta is rejected by WP REST since 4.9.8.
+// ------------------------------------------------------------------
+if (!function_exists('tcs_header_register_meta')) {
+    function tcs_header_register_meta() {
+        register_post_meta('post', TCS_HEADER_META_KEY, array(
+            'show_in_rest'  => true,
+            'type'          => 'string',
+            'single'        => true,
+            'auth_callback' => function () { return current_user_can('edit_posts'); },
+        ));
+    }
+    add_action('init', 'tcs_header_register_meta');
 }
 
 /**
@@ -92,6 +121,7 @@ if (!function_exists('tcs_header_render_img')) {
 
 // ------------------------------------------------------------------
 // 1. Featured image on the page + REST title.rendered thumbnails
+//    Priority 999 = we run last, after FIFU + any other thumbnail plugin.
 // ------------------------------------------------------------------
 if (!function_exists('tcs_header_filter_post_thumbnail_html')) {
     function tcs_header_filter_post_thumbnail_html($html, $post_id, $post_thumbnail_id, $size, $attr) {
@@ -101,7 +131,7 @@ if (!function_exists('tcs_header_filter_post_thumbnail_html')) {
         }
         return tcs_header_render_img($url, $post_id, is_array($attr) ? $attr : array());
     }
-    add_filter('post_thumbnail_html', 'tcs_header_filter_post_thumbnail_html', 10, 5);
+    add_filter('post_thumbnail_html', 'tcs_header_filter_post_thumbnail_html', 999, 5);
 }
 
 // ------------------------------------------------------------------
@@ -113,8 +143,8 @@ if (!function_exists('tcs_header_filter_rankmath_og_image')) {
         $url = tcs_header_get_url($post_id);
         return $url !== null ? $url : $image;
     }
-    add_filter('rank_math/opengraph/facebook/image', 'tcs_header_filter_rankmath_og_image', 10);
-    add_filter('rank_math/opengraph/twitter/image',  'tcs_header_filter_rankmath_og_image', 10);
+    add_filter('rank_math/opengraph/facebook/image', 'tcs_header_filter_rankmath_og_image', 999);
+    add_filter('rank_math/opengraph/twitter/image',  'tcs_header_filter_rankmath_og_image', 999);
 }
 
 // ------------------------------------------------------------------
@@ -126,7 +156,7 @@ if (!function_exists('tcs_header_filter_yoast_og_image')) {
         $url = tcs_header_get_url($post_id);
         return $url !== null ? $url : $image;
     }
-    add_filter('wpseo_opengraph_image', 'tcs_header_filter_yoast_og_image', 10);
+    add_filter('wpseo_opengraph_image', 'tcs_header_filter_yoast_og_image', 999);
 }
 
 // ------------------------------------------------------------------
@@ -147,6 +177,6 @@ if (!function_exists('tcs_header_filter_rss_content')) {
         );
         return $img . $content;
     }
-    add_filter('the_content_feed', 'tcs_header_filter_rss_content', 10);
-    add_filter('the_excerpt_rss',  'tcs_header_filter_rss_content', 10);
+    add_filter('the_content_feed', 'tcs_header_filter_rss_content', 999);
+    add_filter('the_excerpt_rss',  'tcs_header_filter_rss_content', 999);
 }
