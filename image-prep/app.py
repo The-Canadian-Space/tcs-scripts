@@ -4,11 +4,13 @@ Two endpoints:
 
 - POST /composite — original: two images (background + foreground) → centered
   Instagram-ready composite. See :func:`composite`.
-- POST /header — TCS-branded blog header images. Scales a source image to 800px
+- POST /header — TCS-branded blog header images. Scales a source image to 600px
   wide, adds a 102px black bar on top with the stream title in Space Grotesk
   Bold 44px, and a 5px `#970000` accent line between them. Writes the JPEG to a
   volume-mounted output directory and returns a public URL. Design spec locked
-  2026-09-16 in tcs-scripts#5.
+  2026-09-16 in tcs-scripts#5; target width dropped from 800 → 600 on
+  2026-09-17 to give thumbnails headroom against the WP grid without touching
+  bar/font absolute pixel dimensions.
 
 Bind: 127.0.0.1:3001 (localhost only — never expose to the public internet).
 """
@@ -42,7 +44,7 @@ HEADER_ASSET_URL_BASE = os.environ.get(
 )
 
 # Design spec — locked 2026-09-16 (tcs-scripts#5). Do not change without lock re-approval.
-HEADER_TARGET_WIDTH = 800
+HEADER_TARGET_WIDTH = 600
 HEADER_BAR_HEIGHT = 102
 HEADER_LINE_HEIGHT = 5
 HEADER_LINE_COLOR = (151, 0, 0)  # #970000 — TCS canonical red
@@ -226,7 +228,7 @@ def header():
         log.exception("Unexpected error fetching/decoding source image")
         return jsonify(error=f"Source image error: {e}"), 400
 
-    # Scale source to 800px wide, aspect-preserved
+    # Scale source to HEADER_TARGET_WIDTH wide, aspect-preserved
     src_w_in, src_h_in = src.size
     new_source_h = round(src_h_in * HEADER_TARGET_WIDTH / src_w_in)
     src_scaled = src.resize((HEADER_TARGET_WIDTH, new_source_h), Image.LANCZOS)
