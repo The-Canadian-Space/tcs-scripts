@@ -27,7 +27,7 @@ Takes a source image URL + stream title, builds a TCS-branded blog header, and w
 
 | Property | Value |
 |---|---|
-| Output width | 800px (aspect-preserved from source) |
+| Output width | 600px (aspect-preserved from source) |
 | Bar height | 102px |
 | Bar color | `#000000` |
 | Accent line | 5px, `#970000` (TCS red) |
@@ -66,14 +66,14 @@ Fields:
 ```json
 {
   "output_url": "https://assets.thecanadian.space/headers/daily-broadcast/2404-a1b2c3d4.jpg",
-  "dimensions": { "width": 800, "height": 557 },
-  "bytes": 145392,
+  "dimensions": { "width": 600, "height": 445 },
+  "bytes": 87421,
   "cached": false
 }
 ```
 
 - `output_url` — public URL for the generated header. Composed from `TCS_ASSET_URL_BASE + output_dir + filename`.
-- `dimensions.height` — `102 (bar) + 5 (line) + source_scaled_to_800_wide.height`.
+- `dimensions.height` — `102 (bar) + 5 (line) + source_scaled_to_600_wide.height`. Example: a 16:9 source yields height `102 + 5 + 338 = 445`.
 - `cached` — `true` if the endpoint short-circuited (deterministic file already existed).
 
 Filenames are `{post_id}-{sha1(source_url)[:8]}.jpg` — deterministic, idempotent, cache-friendly.
