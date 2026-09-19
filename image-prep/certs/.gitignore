@@ -1,0 +1,7 @@
+# Signing material for C2PA provenance lives here on the VPS only.
+# Never commit a key or cert — the key is a secret, and the cert is
+# host-specific (tcs-scripts#21).
+*
+!.gitignore
+!make-cert.sh
+!README.md

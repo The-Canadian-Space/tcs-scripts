@@ -1,3 +1,5 @@
 # Dev-only dependencies for running the local test suite.
 # Not installed in the runtime Docker image.
 pytest>=8.0,<9.0
+# Generates the throwaway signing cert the provenance tests use (never committed).
+cryptography>=42.0
