@@ -2,7 +2,7 @@
 /**
  * TCS Header Image Adapter
  * ------------------------------------------------------------------
- * Version: 1.1.0
+ * Version: 1.2.0
  * Canonical source: tcs-scripts/wp-snippets/tcs-header-image.php
  * Ticket: https://github.com/The-Canadian-Space/tcs-scripts/issues/8
  * Design spec: https://github.com/The-Canadian-Space/tcs-scripts/issues/5
@@ -19,6 +19,11 @@
  *   - rank_math/opengraph/twitter/image      → twitter:image
  *   - wpseo_opengraph_image                  → Yoast forward-compat
  *   - the_content_feed / the_excerpt_rss     → RSS feed thumbnail
+ *   - the_content                            → strips the first <img> from the
+ *                                              article body (v1.2.0 — the n8n
+ *                                              workflow composited it into the
+ *                                              header, so leaving it in the
+ *                                              body double-shows the imagery)
  *
  * When _tcs_header_url is missing, every hook returns the original value —
  * older posts and posts not yet through the new pipeline fall back to
@@ -37,6 +42,15 @@
  * ------------------------------------------------------------------
  *
  * CHANGELOG
+ *   1.2.0 (2026-09-19):
+ *     - Strip the first `<img>` from article body via `the_content` when
+ *       `_tcs_header_url` is set. Extract Header Source in the n8n workflow
+ *       picks the first article image and composites it into the branded
+ *       header; leaving that same image in the body double-shows the imagery
+ *       (branded composite at top + raw source below). Spotted on a live
+ *       post 2026-09-19. Also applies the same strip to the RSS content
+ *       feed filter so RSS readers don't see the duplicate either. This
+ *       matches the behavior FIFU used to provide.
  *   1.1.0 (2026-09-17):
  *     - Register `_tcs_header_url` as REST-visible protected meta so the n8n
  *       Blog Posting workflow's POST /wp/v2/posts payload can actually store
@@ -160,7 +174,38 @@ if (!function_exists('tcs_header_filter_yoast_og_image')) {
 }
 
 // ------------------------------------------------------------------
-// 4. RSS feed thumbnail — prepend an <img> to the item content and excerpt
+// 4. Strip the first body <img> — the workflow composited that image into
+//    the header, so leaving it in the body double-shows the imagery.
+//    Also cleans up an empty <figure> wrapper if that's what wrapped the img,
+//    and any leading empty <p> the theme might leave behind.
+// ------------------------------------------------------------------
+if (!function_exists('tcs_header_strip_first_img')) {
+    function tcs_header_strip_first_img($content) {
+        $content = preg_replace('/<img[^>]*>/i', '', $content, 1);
+        $content = preg_replace('/<figure[^>]*>\s*<\/figure>/i', '', $content);
+        $content = preg_replace('/^(\s*<p>\s*<\/p>\s*)+/i', '', $content);
+        return $content;
+    }
+}
+
+if (!function_exists('tcs_header_filter_the_content')) {
+    function tcs_header_filter_the_content($content) {
+        $post_id = (int) get_the_ID();
+        if (!$post_id) {
+            return $content;
+        }
+        $url = tcs_header_get_url($post_id);
+        if ($url === null) {
+            return $content;
+        }
+        return tcs_header_strip_first_img($content);
+    }
+    add_filter('the_content', 'tcs_header_filter_the_content', 999);
+}
+
+// ------------------------------------------------------------------
+// 5. RSS feed thumbnail — prepend an <img> to the item content and excerpt,
+//    AND strip the body's first image so RSS readers don't see the duplicate.
 // ------------------------------------------------------------------
 if (!function_exists('tcs_header_filter_rss_content')) {
     function tcs_header_filter_rss_content($content) {
@@ -169,6 +214,7 @@ if (!function_exists('tcs_header_filter_rss_content')) {
         if ($url === null) {
             return $content;
         }
+        $content = tcs_header_strip_first_img($content);
         $alt = get_the_title($post_id);
         $img = sprintf(
             '<figure class="tcs-header-rss"><img src="%s" alt="%s" /></figure>',
