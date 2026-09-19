@@ -141,10 +141,11 @@ See `docker-compose.snippet.yml` for the service block. The `/output` volume mou
 
 1. Edit source files here (`app.py`, `provenance.py`, `Dockerfile`, `requirements.txt`, etc.).
 2. Commit + push to `tcs-scripts`.
-3. Ship the subdir to the VPS. Use `git archive`, not `rsync` from a Windows checkout: it honours `.gitattributes`, so `.sh`/`.py`/`Dockerfile` land with LF endings.
+3. Ship the subdir to the VPS with `git archive`, not `rsync` from a Windows checkout. **Pass `-c core.autocrlf=false`**: archiving the `image-prep` *subtree* makes it the archive root, so the repo-root `.gitattributes` is not consulted and a Windows clone's `core.autocrlf=true` would otherwise export CRLF files (this bit the first deploy on 2026-09-19 — a CRLF `make-cert.sh` is "bad interpreter").
    ```bash
-   git archive --format=tar HEAD:image-prep | ssh ubuntu@51.195.43.156 'tar -x -C /opt/tcs/image-prep'
+   git -c core.autocrlf=false -c core.eol=lf archive --format=tar HEAD:image-prep | ssh ubuntu@51.195.43.156 'tar -x -C /opt/tcs/image-prep'
    ```
+   Sanity-check on the VPS: `tr -cd '' < /opt/tcs/image-prep/certs/make-cert.sh | wc -c` must print `0`.
 4. Rebuild + restart from the compose project: `cd /opt/tcs/n8n && sudo docker compose build image-prep && sudo docker compose up -d image-prep`.
 5. Check the log: `sudo docker compose logs --since 2m image-prep`. A `provenance signing disabled` warning means the cert mount is missing or unreadable — see below.
 
