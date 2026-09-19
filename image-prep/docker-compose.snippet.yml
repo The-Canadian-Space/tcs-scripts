@@ -8,6 +8,11 @@
 # The /output volume mount is required by the /header endpoint. Host directory
 # `/opt/tcs/assets` must exist and be owned by uid 1000 (matches container's
 # `imageprep` user). See tcs-docs/docs/infrastructure/ for the setup writeup.
+#
+# The certs mount carries the C2PA signing material (tcs-scripts#21). Generate
+# it once with `certs/make-cert.sh` AS THE ubuntu USER (uid 1000) so the 0600
+# key is readable by the container's `imageprep` user. If the directory is
+# empty the service still runs; headers are just written unsigned.
 
   image-prep:
     build: /opt/tcs/image-prep
@@ -20,5 +25,9 @@
       TCS_OUTPUT_ROOT: /output
       TCS_ASSET_URL_BASE: https://assets.thecanadian.space
       TCS_HEADER_FONT: /app/fonts/SpaceGrotesk-VariableFont_wght.ttf
+      TCS_C2PA_CERT: /app/certs/tcs-image-prep.crt.pem
+      TCS_C2PA_KEY: /app/certs/tcs-image-prep.key.pem
+      # TCS_C2PA_TSA_URL: http://timestamp.digicert.com  # optional RFC 3161 TSA; off by default (network dep on the hot path)
     volumes:
       - /opt/tcs/assets:/output:rw
+      - /opt/tcs/image-prep/certs:/app/certs:ro

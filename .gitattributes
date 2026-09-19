@@ -5,3 +5,12 @@
 # two sets of new lines is non-deterministic and can be tidied later; the
 # important thing is that merges never fail on this file. Refs #17.
 CHANGELOG.md merge=union
+
+# Anything that runs on the Linux VPS must check out with LF even on Windows
+# clones (core.autocrlf=true): a CRLF shebang line is "bad interpreter" and a
+# CRLF Dockerfile/requirements confuses pip. Same lesson as tcs-docs#197.
+*.sh        text eol=lf
+*.py        text eol=lf
+Dockerfile  text eol=lf
+*.txt       text eol=lf
+*.yml       text eol=lf

@@ -19,13 +19,18 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # App code + bundled fonts (Space Grotesk variable TTF for the /header endpoint,
 # design lock: tcs-scripts#5). OFL.txt travels with the font for license compliance.
-COPY app.py /app/app.py
+# provenance.py signs /header output with a C2PA manifest (tcs-scripts#21);
+# backfill_sign.py is the one-shot re-signer for headers written before that.
+COPY app.py provenance.py backfill_sign.py /app/
 COPY fonts/ /app/fonts/
 
 # Output volume mount point for /header's generated JPEGs. Owner must match the
 # runtime user so writes succeed once a host bind-mount is attached.
-RUN mkdir -p /output \
-    && chown -R imageprep:imageprep /output /app/fonts
+# /app/certs is where compose mounts the C2PA signing cert + key (read-only).
+# Left empty in the image on purpose: no material means signing is disabled
+# and headers are written unsigned (fail-open), never a crash.
+RUN mkdir -p /output /app/certs \
+    && chown -R imageprep:imageprep /output /app/fonts /app/certs
 
 USER imageprep
 EXPOSE 3001

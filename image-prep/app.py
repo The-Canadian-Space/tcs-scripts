@@ -10,7 +10,9 @@ Two endpoints:
   volume-mounted output directory and returns a public URL. Design spec locked
   2026-09-16 in tcs-scripts#5; target width dropped from 800 → 600 on
   2026-09-17 to give thumbnails headroom against the WP grid without touching
-  bar/font absolute pixel dimensions.
+  bar/font absolute pixel dimensions. Since tcs-scripts#21 the JPEG also
+  carries a C2PA provenance manifest when signing material is mounted — see
+  provenance.py; signing is fail-open and reported via `signed` in the response.
 
 Bind: 127.0.0.1:3001 (localhost only — never expose to the public internet).
 """
@@ -20,6 +22,7 @@ import hashlib
 import logging
 import os
 import re
+import uuid
 from io import BytesIO
 from pathlib import Path
 from urllib.error import HTTPError, URLError
@@ -28,9 +31,14 @@ from urllib.request import Request, urlopen
 from flask import Flask, jsonify, request, send_file
 from PIL import Image, ImageDraw, ImageFont, UnidentifiedImageError
 
+import provenance
+
+SERVICE_VERSION = "1.1.0"  # bump on behaviour changes; recorded in every C2PA manifest
+
 DEFAULT_PADDING_PX = 10
 JPEG_QUALITY = 90
 MAX_UPLOAD_BYTES = 25 * 1024 * 1024  # 25 MB per request
+MAX_SOURCE_BYTES = 25 * 1024 * 1024  # /header source fetch cap — same ceiling as uploads
 
 # /header endpoint config
 HEADER_FONT_PATH = os.environ.get(
@@ -150,12 +158,27 @@ def _validate_output_dir(path: str) -> None:
         raise ValueError(f"output_dir must match ^[a-z0-9][a-z0-9_\\-/]*$: {path!r}")
 
 
-def _fetch_source_image(url: str) -> Image.Image:
-    """Download a remote image and return it as a Pillow Image (bytes decoded)."""
-    req = Request(url, headers={"User-Agent": "TCS-image-prep/1.0"})
+class SourceTooLarge(ValueError):
+    pass
+
+
+def _fetch_source_bytes(url: str) -> bytes:
+    """Download a remote image and return the raw bytes.
+
+    Raw bytes (not a decoded Image) so the exact fetched file can be hashed
+    into the C2PA manifest as an ingredient. Capped at MAX_SOURCE_BYTES: the
+    whole body is held in memory and then hashed, so an oversized (or
+    mis-pointed) URL must fail fast rather than exhaust the container.
+    """
+    req = Request(url, headers={"User-Agent": f"TCS-image-prep/{SERVICE_VERSION}"})
     with urlopen(req, timeout=HEADER_FETCH_TIMEOUT) as response:
-        data = response.read()
-    return Image.open(BytesIO(data))
+        declared = response.headers.get("Content-Length")
+        if declared and declared.isdigit() and int(declared) > MAX_SOURCE_BYTES:
+            raise SourceTooLarge(f"source image is {declared} bytes; limit is {MAX_SOURCE_BYTES}")
+        data = response.read(MAX_SOURCE_BYTES + 1)
+    if len(data) > MAX_SOURCE_BYTES:
+        raise SourceTooLarge(f"source image exceeds {MAX_SOURCE_BYTES} bytes")
+    return data
 
 
 def _draw_text_with_letter_spacing(draw, xy, text, font, fill, letter_spacing):
@@ -207,20 +230,27 @@ def header():
     if output_path.exists() and not force:
         with Image.open(output_path) as cached:
             width, height = cached.size
-        log.info("header cache hit: %s (%dx%d)", output_url, width, height)
+        signed = provenance.has_manifest(output_path)
+        log.info("header cache hit: %s (%dx%d, signed=%s)", output_url, width, height, signed)
         return jsonify(
             output_url=output_url,
             dimensions={"width": width, "height": height},
             bytes=output_path.stat().st_size,
             cached=True,
+            signed=signed,
         )
 
-    # Fetch + decode source
+    # Fetch + decode source. Keep the raw bytes and the container format: the
+    # manifest attaches exactly what was fetched as an ingredient.
     try:
-        src = _fetch_source_image(source_url)
+        src_bytes = _fetch_source_bytes(source_url)
+        src = Image.open(BytesIO(src_bytes))
+        src_format = src.format
         src.load()
         src = src.convert("RGB")
     except (URLError, HTTPError) as e:
+        return jsonify(error=f"Could not fetch source image: {e}"), 400
+    except SourceTooLarge as e:
         return jsonify(error=f"Could not fetch source image: {e}"), 400
     except UnidentifiedImageError as e:
         return jsonify(error=f"Could not decode source image: {e}"), 400
@@ -285,16 +315,48 @@ def header():
                 stream_title, total_text, inner_w,
             )
 
-    # Atomic write: temp file → rename, avoids readers seeing a half-written JPEG
+    # Atomic write: temp file → (sign) → rename, avoids readers seeing a
+    # half-written JPEG. Signing is fail-open: on any failure the unsigned
+    # composite is installed instead and `signed` reports false — a missing
+    # manifest is a logged defect, a missing header is a broken blog post.
+    # Per-request temp name: two concurrent requests for the same header
+    # (caller retry, duplicate source) must not truncate each other's temp —
+    # last os.replace wins with a complete file either way.
     output_full_dir.mkdir(parents=True, exist_ok=True)
-    tmp_path = output_path.with_suffix(".jpg.tmp")
+    tmp_path = output_path.with_name(f"{output_path.name}.{uuid.uuid4().hex[:8]}.tmp")
     composite_img.save(tmp_path, "JPEG", quality=JPEG_QUALITY, optimize=True)
-    os.replace(tmp_path, output_path)
+
+    signed = False
+    if provenance.enabled():
+        try:
+            provenance.sign_to(
+                tmp_path, output_path,
+                output_name=filename,
+                service_version=SERVICE_VERSION,
+                target_width=HEADER_TARGET_WIDTH,
+                bar_height=HEADER_BAR_HEIGHT,
+                line_height=HEADER_LINE_HEIGHT,
+                stream_title=stream_title,
+                source_url=source_url,
+                source_bytes=src_bytes,
+                source_format=src_format,
+            )
+            signed = True
+        except Exception:  # noqa: BLE001 — any signing failure falls back to unsigned
+            log.exception("provenance signing failed for %s — installing unsigned header", filename)
+    else:
+        log.warning("provenance signing disabled (no cert/key at %s / %s)",
+                    provenance.CERT_PATH, provenance.KEY_PATH)
+
+    if signed:
+        tmp_path.unlink(missing_ok=True)
+    else:
+        os.replace(tmp_path, output_path)
 
     file_bytes = output_path.stat().st_size
     log.info(
-        "header ok: post_id=%s src=%dx%d out=%dx%d bytes=%d title=%r",
-        post_id, src_w_in, src_h_in, HEADER_TARGET_WIDTH, total_h, file_bytes, stream_title,
+        "header ok: post_id=%s src=%dx%d out=%dx%d bytes=%d signed=%s title=%r",
+        post_id, src_w_in, src_h_in, HEADER_TARGET_WIDTH, total_h, file_bytes, signed, stream_title,
     )
 
     return jsonify(
@@ -302,6 +364,7 @@ def header():
         dimensions={"width": HEADER_TARGET_WIDTH, "height": total_h},
         bytes=file_bytes,
         cached=False,
+        signed=signed,
     )
 
 

@@ -5,6 +5,8 @@ CLAUDE.md
 .env
 .env.local
 *.key
+# signing material — image-prep's C2PA cert/key live on the VPS only (tcs-scripts#21)
+*.pem
 *secret*
 *credential*
 *password*

@@ -1,51 +1,32 @@
 """Happy-path smoke tests for /header.
 
 Network fetch is monkeypatched so the tests run offline and deterministically.
+sys.path / font env / `client` fixture come from conftest.py.
 """
 from __future__ import annotations
 
 import hashlib
 import io
-import os
-import pathlib
-import sys
 
-import pytest
 from PIL import Image
 
-# Make image-prep/ importable when running from tcs-scripts root or from image-prep/
-_HERE = pathlib.Path(__file__).resolve().parent
-_APP_DIR = _HERE.parent
-if str(_APP_DIR) not in sys.path:
-    sys.path.insert(0, str(_APP_DIR))
-
-# Ensure the endpoint uses a font path that exists at repo layout time.
-os.environ.setdefault(
-    "TCS_HEADER_FONT",
-    str(_APP_DIR / "fonts" / "SpaceGrotesk-VariableFont_wght.ttf"),
-)
-
-import app as app_module  # noqa: E402
-
-
-@pytest.fixture()
-def client(tmp_path, monkeypatch):
-    # Redirect the output root to a tmp dir so tests don't touch /output.
-    monkeypatch.setattr(app_module, "HEADER_OUTPUT_ROOT", str(tmp_path))
-    app_module.app.config["TESTING"] = True
-    with app_module.app.test_client() as c:
-        yield c
+import app as app_module
 
 
 def _synthetic_source(width: int, height: int, color=(30, 60, 120)) -> Image.Image:
     return Image.new("RGB", (width, height), color)
 
 
-def _install_fake_fetch(monkeypatch, img: Image.Image) -> None:
+def _install_fake_fetch(monkeypatch, img: Image.Image, fmt: str = "JPEG") -> None:
+    # The endpoint fetches raw bytes (so the source can be hashed into the C2PA
+    # manifest as an ingredient) and decodes them itself.
+    buf = io.BytesIO()
+    img.save(buf, fmt)
+    data = buf.getvalue()
+
     def _fake(url):
-        # Return a fresh Image each call so .load() and .convert() are safe.
-        return img.copy()
-    monkeypatch.setattr(app_module, "_fetch_source_image", _fake)
+        return data
+    monkeypatch.setattr(app_module, "_fetch_source_bytes", _fake)
 
 
 def test_header_happy_path_16_9(client, tmp_path, monkeypatch):
@@ -63,6 +44,8 @@ def test_header_happy_path_16_9(client, tmp_path, monkeypatch):
     # 102 (bar) + 5 (line) + 338 (source scaled to 600 wide from 1600x900) = 445
     assert body["dimensions"]["height"] == 445
     assert body["cached"] is False
+    # No signing material configured in this suite → unsigned, and says so.
+    assert body["signed"] is False
     assert body["output_url"].startswith("https://assets.thecanadian.space/headers/daily-broadcast/2404-")
     assert body["output_url"].endswith(".jpg")
 
