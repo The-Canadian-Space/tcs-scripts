@@ -2,7 +2,7 @@
 /**
  * TCS Header Image Adapter
  * ------------------------------------------------------------------
- * Version: 1.1.0
+ * Version: 1.2.1
  * Canonical source: tcs-scripts/wp-snippets/tcs-header-image.php
  * Ticket: https://github.com/The-Canadian-Space/tcs-scripts/issues/8
  * Design spec: https://github.com/The-Canadian-Space/tcs-scripts/issues/5
@@ -14,7 +14,12 @@
  * that URL into every WordPress surface that would otherwise emit a featured
  * image, OG image, or RSS thumbnail:
  *
- *   - post_thumbnail_html                    → in-page featured image
+ *   - post_thumbnail_html                    → featured image on category /
+ *                                              archive / list contexts.
+ *                                              Suppressed on singular post view
+ *                                              (v1.2.1 — reader sees the article
+ *                                              body's natural imagery, no
+ *                                              duplication with the composite).
  *   - rank_math/opengraph/facebook/image     → og:image
  *   - rank_math/opengraph/twitter/image      → twitter:image
  *   - wpseo_opengraph_image                  → Yoast forward-compat
@@ -37,6 +42,23 @@
  * ------------------------------------------------------------------
  *
  * CHANGELOG
+ *   1.2.1 (2026-09-19):
+ *     - Reverse the v1.2.0 approach for singular post view. Instead of
+ *       stripping the first `<img>` from the body, suppress the branded
+ *       composite (returned empty from `post_thumbnail_html`) whenever the
+ *       reader is on `is_singular('post')`. Result: the singular reader sees
+ *       the article's natural imagery, no composite duplicating it at the
+ *       top. Category / archive contexts still receive the composite as their
+ *       thumbnail. OG / Twitter previews still receive the composite. RSS
+ *       still receives the composite prepended.
+ *     - `the_content` filter from v1.2.0 removed.
+ *     - RSS `the_content_feed` filter still strips the first body <img> so RSS
+ *       readers don't see the duplicate (v1.2.0 behaviour preserved for RSS).
+ *   1.2.0 (2026-09-19):
+ *     - Strip the first `<img>` from article body via `the_content` when
+ *       `_tcs_header_url` is set. Spotted on a live post 2026-09-19 where
+ *       the branded composite + raw source image both appeared. Superseded
+ *       by v1.2.1's inverse approach.
  *   1.1.0 (2026-09-17):
  *     - Register `_tcs_header_url` as REST-visible protected meta so the n8n
  *       Blog Posting workflow's POST /wp/v2/posts payload can actually store
@@ -122,12 +144,19 @@ if (!function_exists('tcs_header_render_img')) {
 // ------------------------------------------------------------------
 // 1. Featured image on the page + REST title.rendered thumbnails
 //    Priority 999 = we run last, after FIFU + any other thumbnail plugin.
+//    On singular post view: return empty so the composite doesn't render
+//    at the top of the article — the reader gets the natural article body
+//    without the composite duplicating the first body image (v1.2.1).
+//    Category / archive contexts still get the composite as the thumbnail.
 // ------------------------------------------------------------------
 if (!function_exists('tcs_header_filter_post_thumbnail_html')) {
     function tcs_header_filter_post_thumbnail_html($html, $post_id, $post_thumbnail_id, $size, $attr) {
         $url = tcs_header_get_url($post_id);
         if ($url === null) {
             return $html;
+        }
+        if (is_singular('post')) {
+            return '';
         }
         return tcs_header_render_img($url, $post_id, is_array($attr) ? $attr : array());
     }
@@ -160,8 +189,21 @@ if (!function_exists('tcs_header_filter_yoast_og_image')) {
 }
 
 // ------------------------------------------------------------------
-// 4. RSS feed thumbnail — prepend an <img> to the item content and excerpt
+// 4. RSS feed thumbnail — prepend an <img> to the item content and excerpt,
+//    AND strip the body's first image so RSS readers don't see the duplicate.
+//    (RSS readers don't render WordPress' featured image, so we prepend
+//    manually — but that means we still need to strip the first body img
+//    to avoid the same duplication we suppress at the singular-view level.)
 // ------------------------------------------------------------------
+if (!function_exists('tcs_header_strip_first_img')) {
+    function tcs_header_strip_first_img($content) {
+        $content = preg_replace('/<img[^>]*>/i', '', $content, 1);
+        $content = preg_replace('/<figure[^>]*>\s*<\/figure>/i', '', $content);
+        $content = preg_replace('/^(\s*<p>\s*<\/p>\s*)+/i', '', $content);
+        return $content;
+    }
+}
+
 if (!function_exists('tcs_header_filter_rss_content')) {
     function tcs_header_filter_rss_content($content) {
         $post_id = (int) get_the_ID();
@@ -169,6 +211,7 @@ if (!function_exists('tcs_header_filter_rss_content')) {
         if ($url === null) {
             return $content;
         }
+        $content = tcs_header_strip_first_img($content);
         $alt = get_the_title($post_id);
         $img = sprintf(
             '<figure class="tcs-header-rss"><img src="%s" alt="%s" /></figure>',
