@@ -2,7 +2,7 @@
 /**
  * TCS Header Image Adapter
  * ------------------------------------------------------------------
- * Version: 1.2.1
+ * Version: 1.3.0
  * Canonical source: tcs-scripts/wp-snippets/tcs-header-image.php
  * Ticket: https://github.com/The-Canadian-Space/tcs-scripts/issues/8
  * Design spec: https://github.com/The-Canadian-Space/tcs-scripts/issues/5
@@ -42,6 +42,13 @@
  * ------------------------------------------------------------------
  *
  * CHANGELOG
+ *   1.3.0 (2026-09-20):
+ *     - Register a second REST-visible meta key, `_tcs_header_source_url`:
+ *       the original article image the composite was built from. Written by
+ *       the n8n Blog Posting workflow next to `_tcs_header_url`; read by the
+ *       Canadian Space Webhooks snippet so the Social Posts workflow can keep
+ *       the X image tweet from repeating the image the link card unfurls to
+ *       (tcs-workflows#74). Nothing in this file renders it.
  *   1.2.1 (2026-09-19):
  *     - Reverse the v1.2.0 approach for singular post view. Instead of
  *       stripping the first `<img>` from the body, suppress the branded
@@ -77,20 +84,29 @@
 if (!defined('TCS_HEADER_META_KEY')) {
     define('TCS_HEADER_META_KEY', '_tcs_header_url');
 }
+// The article image the composite was generated from (v1.3.0, tcs-workflows#74).
+// Stored only so downstream consumers (the publish webhook -> Social Posts) can
+// recognise it; this snippet never renders it.
+if (!defined('TCS_HEADER_SOURCE_META_KEY')) {
+    define('TCS_HEADER_SOURCE_META_KEY', '_tcs_header_source_url');
+}
 
 // ------------------------------------------------------------------
-// 0. Register `_tcs_header_url` for REST — without this, WP silently drops
-//    it on POST /wp/v2/posts because underscore-prefixed meta is "protected"
-//    and unregistered protected meta is rejected by WP REST since 4.9.8.
+// 0. Register `_tcs_header_url` (and, since v1.3.0, `_tcs_header_source_url`)
+//    for REST — without this, WP silently drops them on POST /wp/v2/posts
+//    because underscore-prefixed meta is "protected" and unregistered
+//    protected meta is rejected by WP REST since 4.9.8.
 // ------------------------------------------------------------------
 if (!function_exists('tcs_header_register_meta')) {
     function tcs_header_register_meta() {
-        register_post_meta('post', TCS_HEADER_META_KEY, array(
-            'show_in_rest'  => true,
-            'type'          => 'string',
-            'single'        => true,
-            'auth_callback' => function () { return current_user_can('edit_posts'); },
-        ));
+        foreach (array(TCS_HEADER_META_KEY, TCS_HEADER_SOURCE_META_KEY) as $key) {
+            register_post_meta('post', $key, array(
+                'show_in_rest'  => true,
+                'type'          => 'string',
+                'single'        => true,
+                'auth_callback' => function () { return current_user_can('edit_posts'); },
+            ));
+        }
     }
     add_action('init', 'tcs_header_register_meta');
 }
