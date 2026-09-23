@@ -6,7 +6,7 @@ Design rationale for choosing Code Snippets over a mu-plugin is captured in [tcs
 
 ## Files
 
-- [`tcs-header-image.php`](tcs-header-image.php) — reads `_tcs_header_url` post meta (written by the n8n Blog Posting workflow) and injects it as the featured image, OG image, Twitter card image, and RSS thumbnail. Design spec: [tcs-scripts#5](https://github.com/The-Canadian-Space/tcs-scripts/issues/5). Storage: [assets.thecanadian.space](https://github.com/The-Canadian-Space/tcs-docs/blob/main/docs/infrastructure/canonical-assets.md).
+- [`tcs-header-image.php`](tcs-header-image.php) — reads `_tcs_header_url` post meta (written by the n8n Blog Posting workflow) and injects it as the featured image, OG image, Twitter card image, and RSS thumbnail. Since v1.3.0 it also registers `_tcs_header_source_url` (the image the composite was built from) for REST so Blog Posting can store it and the publish webhook can pass it to Social Posts ([tcs-workflows#74](https://github.com/The-Canadian-Space/tcs-workflows/issues/74)). Design spec: [tcs-scripts#5](https://github.com/The-Canadian-Space/tcs-scripts/issues/5). Storage: [assets.thecanadian.space](https://github.com/The-Canadian-Space/tcs-docs/blob/main/docs/infrastructure/canonical-assets.md).
 
 ## Install a new snippet
 
