@@ -13,8 +13,20 @@ name: Add to TCS project
 on:
   issues:
     types: [opened]
-  pull_request:
-    types: [opened]
+  # tcs-docs#218 (2026-09-25): `pull_request` removed deliberately.
+  #
+  # The changelog bot opens its PRs on bot/changelog using GITHUB_TOKEN, and
+  # GitHub does not execute workflow runs triggered that way - the recursion
+  # barrier. It still RECORDS a run, which lands as a failure with zero jobs
+  # dispatched, so this workflow produced ~13 red runs in 7 days across this
+  # repo, tcs-scripts and tcs-public-wiki.
+  #
+  # A job-level `if: github.actor != 'github-actions[bot]'` cannot fix it:
+  # no job is ever dispatched, so the condition is never evaluated.
+  #
+  # Nothing is lost. Across all four repos, zero issues and zero human-opened
+  # PRs have ever failed to reach the board - only bot PRs, which do not want
+  # cards. Issues are what the board is for.
 
 permissions:
   contents: read
