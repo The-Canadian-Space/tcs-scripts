@@ -48,7 +48,7 @@ Takes a source image URL + stream title, builds a TCS-branded blog header, and w
   "source_url": "https://example.com/rocket.jpg",
   "stream_title": "The Daily Broadcast",
   "output_dir": "headers/daily-broadcast",
-  "post_id": 2404,
+  "post_id": "20261004-080512",
   "force": false
 }
 ```
@@ -58,7 +58,7 @@ Fields:
 - `source_url` (required) — the image to use as the bottom portion of the composite. Fetched with a 30s timeout.
 - `stream_title` (required) — the text rendered on the black bar.
 - `output_dir` (required) — path relative to `TCS_OUTPUT_ROOT`. Must match `^[a-z0-9][a-z0-9_\-/]*$`. No leading slash, no `..`.
-- `post_id` (required) — WordPress post ID; goes into the deterministic output filename.
+- `post_id` (required) — anything that makes the file unique to this post. It becomes the start of the filename, so it's public. Blog Posting sends the run's timestamp (`YYYYMMDD-HHMMSS`, Toronto time). Don't send internal ids: until 2026-10-03 it sent the n8n execution id, which put those ids in public URLs ([tcs-workflows#131](https://github.com/The-Canadian-Space/tcs-workflows/issues/131)).
 - `force` (optional, default `false`) — regenerate even if the deterministic output already exists.
 
 ### Response
@@ -112,7 +112,7 @@ What the manifest claims:
 | `c2pa.placed` action | links to the ingredient | "The source photo was placed into this composite." |
 | `c2pa.resized` action | description of the 600 px scale | |
 | `c2pa.edited` action | description of the bar/accent/title; states *non-generative* | |
-| `space.thecanadian.image-prep.header` (custom assertion) | `stream_title`, `source_url` (fresh) or `note` (backfill) | Which stream the header was made for. Deliberately no `post_id`: the caller's value is n8n's execution id, and internal ids don't belong in a public manifest. |
+| `space.thecanadian.image-prep.header` (custom assertion) | `stream_title`, `source_url` (fresh) or `note` (backfill) | Which stream the header was made for. Deliberately no `post_id`: until 2026-10-03 the caller sent n8n's execution id there, and run ids don't belong in a public manifest. |
 | `claim_generator_info` | `TCS image-prep` + `SERVICE_VERSION` | |
 | `c2pa.hash.data` | added by the SDK | Standard content binding. |
 

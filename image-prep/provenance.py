@@ -169,9 +169,10 @@ def build_manifest(
         ),
     })
 
-    # Deliberately no post/execution identifier here: the caller's "post_id" is
-    # n8n's execution id (the WP post doesn't exist yet when the header is
-    # built), and internal ids don't belong in a public manifest.
+    # Deliberately no post or run identifier here: the caller's "post_id" was
+    # n8n's execution id until 2026-10-03 (a timestamp since; tcs-workflows#131;
+    # the WP post doesn't exist yet when the header is built), and run ids
+    # don't belong in a public manifest.
     header = {k: v for k, v in {
         "stream_title": stream_title,
         "source_url": source_url,
