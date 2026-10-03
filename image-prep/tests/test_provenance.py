@@ -101,8 +101,9 @@ def test_signed_header_manifest_shape(client, tmp_path, monkeypatch, signing_ena
         "stream_title": "The Daily Broadcast",
         "source_url": PAYLOAD["source_url"],
     }
-    # The caller's "post_id" is n8n's execution id; it must not surface in the
-    # public manifest under any label.
+    # Whatever the caller sends as "post_id" (an n8n execution id until
+    # 2026-10-03, a timestamp since) must not surface in the public manifest
+    # under any label.
     assert "2404" not in json.dumps(m["assertions"])
 
 
