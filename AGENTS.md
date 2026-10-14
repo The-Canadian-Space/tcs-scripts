@@ -1,12 +1,12 @@
 # AGENTS.md — tcs-scripts
 
-**Per-workflow Python/JS helpers + the `image-prep/` containerized service, all called by TCS n8n workflows.**
+**Per-workflow JavaScript for n8n Code nodes, plus the VPS-side Python: the `image-prep/` service and the scripts n8n runs over SSH.**
 
 > **First-time context:** start with the top-level [AGENTS.md](../AGENTS.md) in the working directory. This file is repo-specific.
 
 ## What lives here
 
-Each subdirectory corresponds to one V3 blog pipeline (or a shared service). Scripts here are called by n8n workflows via the Execute Workflow node or via SSH from a Code node.
+Each subdirectory corresponds to one V3 blog pipeline (or a shared service). The JavaScript is copied into those workflows' Code nodes, which are all JavaScript: the n8n image has no Python runner (281 Code nodes checked 2026-10-13). The Python runs on the VPS: `image-prep/` as a container, `write_csa_articles.py` and `write_mls_articles.py` from `/opt/tcs/scripts/` through n8n SSH nodes, and `ovh-wrapper/` from the Sunday maintenance script.
 
 | Directory | Purpose |
 |---|---|
@@ -19,7 +19,9 @@ Each subdirectory corresponds to one V3 blog pipeline (or a shared service). Scr
 | `social-posts/` | Social media utilities (Instagram carousel, X post prep) |
 | `llm-usage-tracker/` | Cost aggregation helpers |
 | **`image-prep/`** | **Flask image composition service. LIVE. See below.** |
-| `write_csa_articles.py`, `write_mls_articles.py` | Direct dependencies of Canada From Orbit V3 |
+| `ovh-wrapper/` | OVH API wrapper for the Sunday maintenance snapshots; deployed to `/opt/tcs/ovh-wrapper/` |
+| `wp-snippets/` | WordPress PHP snippets (header image) |
+| `write_csa_articles.py`, `write_mls_articles.py` | Direct dependencies of Canada From Orbit V3, run by its SSH nodes as `python3 /opt/tcs/scripts/write_*_articles.py` |
 
 ## image-prep — special notes
 
@@ -48,7 +50,7 @@ TCS-wide practices (test-before-deploy, docs-in-same-PR) live in the parent — 
 
 1. **Read the caller before editing.** If you're modifying a script, find which workflow calls it (`grep -r <script_name>` on the tcs-workflows JSON backups) and understand the context.
 2. **Preserve function signatures** if callers depend on them. Adding new args with defaults is safe; renaming positional args is not.
-3. **Deploy path awareness.** Some scripts run on the VPS (SSH'd from n8n), others run inside n8n Python Code nodes. Which one matters for imports + filesystem paths.
+3. **Deploy path awareness.** JavaScript runs inside n8n Code nodes, where only `gm` and `fs` can be required. Python runs on the VPS, SSH'd from n8n or as the `image-prep` container. Which one matters for imports + filesystem paths.
 4. **Corresponding workflow doc lives at `tcs-docs/docs/workflows/<workflow>.md`** — update it in the same PR when script interface changes.
 
 ## How to verify (before flagging In QA or closing)
