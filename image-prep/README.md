@@ -1,11 +1,12 @@
 # image-prep
 
-Flask-based image service. Two endpoints:
+Flask-based image service. Three endpoints:
 
 - **`POST /composite`** — the original Instagram compositor (background + foreground → centered composite).
+- **`POST /fit`** — makes an image fit a platform's limits (default X's: 4,096 px, 5 MB). One that already fits comes back unchanged.
 - **`POST /header`** — TCS-branded blog header images (scaled source + black bar + `#970000` accent line + stream title). Design spec locked 2026-09-16 in [tcs-scripts#5](https://github.com/The-Canadian-Space/tcs-scripts/issues/5).
 
-Callers: the **Social Posts** n8n workflow uses `/composite`; the **Blog Posting** workflow uses `/header` (see [tcs-workflows#65](https://github.com/The-Canadian-Space/tcs-workflows/issues/65)).
+Callers: **Post to Instagram** uses `/composite`, **Post to X** uses `/fit`, and the **Blog Posting** workflow uses `/header` (see [tcs-workflows#65](https://github.com/The-Canadian-Space/tcs-workflows/issues/65)).
 
 ---
 
@@ -16,6 +17,28 @@ Preserves background dimensions verbatim (no resize, no crop). Preserves foregro
 Input: `multipart/form-data` with `background` and `foreground` file fields, and an optional `padding` int (default 10).
 
 Output: JPEG binary.
+
+---
+
+## `POST /fit`
+
+Makes one image fit a platform's limits. The defaults are X's: longest side 4,096 px, at most 5 MB. Added for [tcs-workflows#293](https://github.com/The-Canadian-Space/tcs-workflows/issues/293): X accepted the upload of an 8,250 × 5,490 px NASA image, then refused it on the tweet ("Your media IDs are invalid.").
+
+- **An image that already fits,** in a format X takes (JPEG, PNG, WebP, GIF), comes back byte for byte, EXIF and all.
+- **Anything else** is turned the way its EXIF orientation says, flattened onto white where it's transparent, scaled down (never up) with LANCZOS and saved as a JPEG at q90. The EXIF is dropped; an RGB colour profile is kept. If the JPEG is still over the byte cap, the quality drops in steps to 60, then the image shrinks by 20% a step.
+- **Big JPEGs** are decoded at a reduced DCT scale, which keeps them fast and light on memory.
+
+Input: `multipart/form-data` with an `image` file field. Optional `max_side` (64–8192, default 4096) and `max_bytes` (100,000–15,000,000, default 5,000,000), as query or form parameters.
+
+Output: the image (`image/jpeg` when re-encoded, otherwise its own type), with these headers:
+
+| Header | Value |
+|---|---|
+| `X-TCS-Fit` | `as-is`, `resized`, or `re-encoded` (same size, new format) |
+| `X-TCS-Width`, `X-TCS-Height`, `X-TCS-Bytes` | What's returned |
+| `X-TCS-Source-Width`, `X-TCS-Source-Height`, `X-TCS-Source-Bytes` | What was sent |
+
+Errors: `400` with `{"error": ...}` for a missing `image` field, a file that isn't an image (or is over Pillow's decompression-bomb limit), or a parameter out of range. `413` over the 25 MB request cap.
 
 ---
 
@@ -180,6 +203,7 @@ The test suite mocks the network fetch and writes to a tmp directory, so no exte
 
 ## Callers
 
-- **`The Canadian Space - Social Posts`** — Instagram composite generation via `/composite`.
+- **`TCS - Social - Post to Instagram`** — the Instagram composite via `/composite` (in Social Posts until tcs-workflows#269 split the platforms out).
+- **`TCS - Social - Post to X`** — fits the post's image to X's limits via `/fit` before uploading it (tcs-workflows#293).
 - **`The Canadian Space - Blog Posting`** — branded header images via `/header` (integration pending [tcs-workflows#65](https://github.com/The-Canadian-Space/tcs-workflows/issues/65)).
 - **`TEST BED`** — occasional integration testing.
