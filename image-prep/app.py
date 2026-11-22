@@ -1,9 +1,13 @@
 """TCS image composition service.
 
-Two endpoints:
+Three endpoints:
 
 - POST /composite — original: two images (background + foreground) → centered
   Instagram-ready composite. See :func:`composite`.
+- POST /fit — one image → the same image made to fit a platform's limits
+  (default X's: longest side 4,096 px, 5 MB). An image that already fits comes
+  back byte for byte; a bigger one is scaled down and re-encoded as JPEG. Added
+  for tcs-workflows#293 (X refused an 8,250 px NASA image). See :func:`fit`.
 - POST /header — TCS-branded blog header images. Scales a source image to 600px
   wide, adds a 102px black bar on top with the stream title in Space Grotesk
   Bold 44px, and a 5px `#970000` accent line between them. Writes the JPEG to a
@@ -29,11 +33,11 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from flask import Flask, jsonify, request, send_file
-from PIL import Image, ImageDraw, ImageFont, UnidentifiedImageError
+from PIL import Image, ImageDraw, ImageFont, ImageOps, UnidentifiedImageError
 
 import provenance
 
-SERVICE_VERSION = "1.1.0"  # bump on behaviour changes; recorded in every C2PA manifest
+SERVICE_VERSION = "1.2.0"  # bump on behaviour changes; recorded in every C2PA manifest
 
 DEFAULT_PADDING_PX = 10
 JPEG_QUALITY = 90
@@ -63,6 +67,17 @@ HEADER_FONT_VARIATION = "Bold"  # Bold instance of the variable font (weight 700
 HEADER_LETTER_SPACING = 0.5
 HEADER_PADDING_H = 24
 HEADER_FETCH_TIMEOUT = 30
+
+# /fit endpoint config (tcs-workflows#293). The defaults are X's: its docs give 5 MB for an image, and X shows
+# images at most 4,096 px a side. It refused an 8,250 x 5,490 px image (third-party guides put the cap at 8,192 px),
+# so 4,096 keeps a wide margin without losing anything X would show.
+FIT_DEFAULT_MAX_SIDE = 4096
+FIT_DEFAULT_MAX_BYTES = 5_000_000
+FIT_MAX_SIDE_RANGE = (64, 8192)
+FIT_MAX_BYTES_RANGE = (100_000, 15_000_000)
+FIT_PASS_FORMATS = {"JPEG", "PNG", "WEBP", "GIF"}  # the formats X takes; anything else is re-encoded
+FIT_MIN_QUALITY = 60  # below this the image shrinks instead of losing more quality
+FIT_BG_COLOR = (255, 255, 255)  # what transparent areas become in the JPEG
 
 _SAFE_DIR_RE = re.compile(r"^[a-z0-9][a-z0-9_\-/]*$")
 
@@ -143,6 +158,126 @@ def composite():
         as_attachment=False,
         download_name="instagram.jpg",
     )
+
+
+class FitError(ValueError):
+    pass
+
+
+def _int_param(name: str, default: int, bounds: tuple[int, int]) -> int:
+    """A whole-number query or form parameter, or `default` when it's absent. ValueError outside `bounds`."""
+    raw = request.args.get(name)
+    if raw is None:
+        raw = request.form.get(name)
+    if raw is None or raw == "":
+        return default
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        raise ValueError(f"{name} must be a whole number, got {raw!r}") from None
+    lo, hi = bounds
+    if not lo <= value <= hi:
+        raise ValueError(f"{name} must be between {lo} and {hi}, got {value}")
+    return value
+
+
+def _flatten_rgb(img: Image.Image) -> Image.Image:
+    """RGB for a JPEG. Transparent areas become FIT_BG_COLOR, not the black a plain convert("RGB") gives."""
+    if img.mode in ("RGBA", "LA", "PA") or (img.mode == "P" and "transparency" in img.info):
+        rgba = img.convert("RGBA")
+        flat = Image.new("RGB", rgba.size, FIT_BG_COLOR)
+        flat.paste(rgba, mask=rgba.getchannel("A"))
+        return flat
+    return img if img.mode == "RGB" else img.convert("RGB")
+
+
+def _fit_image(data: bytes, max_side: int, max_bytes: int) -> tuple[bytes, str, dict]:
+    """Make `data` fit within max_side x max_side pixels and max_bytes. Returns (bytes, mimetype, info).
+
+    An image that already fits, in a format X takes, comes back unchanged (EXIF and all). Anything else is decoded
+    (a JPEG at a reduced DCT scale: fast and light on memory), turned the way its EXIF orientation says (the EXIF
+    is dropped), flattened onto white, scaled down with LANCZOS (never up) and saved as a JPEG. If that is still
+    over max_bytes, the quality drops in steps to FIT_MIN_QUALITY, then the image shrinks by 20% a step.
+    """
+    src = Image.open(BytesIO(data))
+    fmt = src.format
+    src_w, src_h = src.size
+    info = {"source_width": src_w, "source_height": src_h, "source_bytes": len(data), "source_format": fmt}
+    if fmt in FIT_PASS_FORMATS and max(src_w, src_h) <= max_side and len(data) <= max_bytes:
+        return data, Image.MIME.get(fmt, "application/octet-stream"), {
+            **info, "fit": "as-is", "width": src_w, "height": src_h, "bytes": len(data), "format": fmt,
+        }
+
+    # An RGB profile still describes the pixels after the re-encode; a grey or CMYK one wouldn't.
+    icc = src.info.get("icc_profile") if src.mode in ("RGB", "RGBA") else None
+    scale = min(1.0, max_side / src_w, max_side / src_h)
+    if fmt == "JPEG" and scale < 1.0:
+        src.draft("RGB", (max(1, int(src_w * scale)), max(1, int(src_h * scale))))
+    img = _flatten_rgb(ImageOps.exif_transpose(src))
+    img.thumbnail((max_side, max_side), Image.LANCZOS)
+
+    quality = JPEG_QUALITY
+    while True:
+        buf = BytesIO()
+        img.save(buf, format="JPEG", quality=quality, optimize=True, **({"icc_profile": icc} if icc else {}))
+        out = buf.getvalue()
+        if len(out) <= max_bytes:
+            break
+        if quality > FIT_MIN_QUALITY:
+            quality = max(FIT_MIN_QUALITY, quality - 10)
+            continue
+        w, h = img.size
+        if max(w, h) <= FIT_MAX_SIDE_RANGE[0]:
+            raise FitError(f"could not get the image under {max_bytes} bytes")
+        img = img.resize((max(1, round(w * 0.8)), max(1, round(h * 0.8))), Image.LANCZOS)
+
+    kind = "resized" if max(img.size) < max(src_w, src_h) else "re-encoded"
+    return out, "image/jpeg", {
+        **info, "fit": kind, "width": img.width, "height": img.height, "bytes": len(out), "format": "JPEG",
+        "quality": quality,
+    }
+
+
+@app.post("/fit")
+def fit():
+    """One image -> the same image within a platform's limits (tcs-workflows#293).
+
+    Form field `image` (the file). Optional `max_side` (px, default 4096) and `max_bytes` (default 5,000,000), as
+    query or form parameters. Returns the image, with headers X-TCS-Fit (as-is | resized | re-encoded),
+    X-TCS-Width/-Height/-Bytes and X-TCS-Source-Width/-Height/-Bytes. 400 with {"error": ...} on bad input.
+    """
+    file = request.files.get("image")
+    if not file:
+        return jsonify(error="The 'image' file field is required"), 400
+    try:
+        max_side = _int_param("max_side", FIT_DEFAULT_MAX_SIDE, FIT_MAX_SIDE_RANGE)
+        max_bytes = _int_param("max_bytes", FIT_DEFAULT_MAX_BYTES, FIT_MAX_BYTES_RANGE)
+    except ValueError as e:
+        return jsonify(error=str(e)), 400
+
+    data = file.read()
+    try:
+        out, mimetype, info = _fit_image(data, max_side, max_bytes)
+    except (UnidentifiedImageError, Image.DecompressionBombError) as e:
+        return jsonify(error=f"Could not parse image: {e}"), 400
+    except FitError as e:
+        return jsonify(error=str(e)), 400
+    except Exception as e:  # noqa: BLE001 — surface unexpected decode errors to the client, as /composite does
+        log.exception("fit: failed to process the image")
+        return jsonify(error=f"Image decode error: {e}"), 400
+
+    log.info(
+        "fit %s: src=%dx%d %dB %s -> out=%dx%d %dB %s (max_side=%d max_bytes=%d)",
+        info["fit"], info["source_width"], info["source_height"], info["source_bytes"], info["source_format"],
+        info["width"], info["height"], info["bytes"], info["format"], max_side, max_bytes,
+    )
+    ext = {"image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "image/gif": "gif"}.get(mimetype, "bin")
+    resp = send_file(BytesIO(out), mimetype=mimetype, as_attachment=False, download_name=f"fit.{ext}")
+    resp.headers["X-TCS-Fit"] = info["fit"]
+    for key in ("width", "height", "bytes"):
+        resp.headers[f"X-TCS-{key.title()}"] = str(info[key])
+        resp.headers[f"X-TCS-Source-{key.title()}"] = str(info[f"source_{key}"])
+    return resp
 
 
 def _validate_output_dir(path: str) -> None:
